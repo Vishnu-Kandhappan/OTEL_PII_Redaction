@@ -3,116 +3,128 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PII Redaction Workflow</title>
+  <title>PII Redaction Architecture</title>
   <style>
-    /* Base Styling and Variables */
     :root {
-      --ff-sans: system-ui, -apple-system, sans-serif;
-      --ff-mono: monospace;
-      --surface-bright: #ffffff;
-      --surface-dim: #f2f0f0;
-      --stroke-default: #e3e3e3;
-      --on-surface: #000000;
-      --on-surface-variant: rgba(0, 0, 0, 0.55);
+      --ff-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --ff-mono: 'Courier New', Courier, monospace;
       
-      /* Node Colors */
-      --color-source: #c84288;
-      --color-envoy: #2575fc;
-      --color-otel: #705ec2;
-      --color-sink: #228a49;
+      --surface: #ffffff;
+      --surface-dim: #f3f4f6;
+      --surface-container: #e5e7eb;
+      --on-surface: #111827;
+      --on-surface-variant: #4b5563;
+      --stroke: #d1d5db;
+      
+      --color-source: #3b82f6; /* Blue */
+      --color-proxy: #f59e0b;  /* Amber */
+      --color-core: #8b5cf6;   /* Purple */
+      --color-sink: #10b981;   /* Green */
     }
 
     body {
       margin: 0;
       padding: 20px;
-      background: #fafafa;
+      background-color: #f9fafb;
       font-family: var(--ff-sans);
       color: var(--on-surface);
+      display: flex;
+      justify-content: center;
     }
 
     .widget-container {
       width: 100%;
-      max-width: 800px;
-      margin: 0 auto;
+      max-width: 900px;
       display: flex;
       flex-direction: column;
       gap: 20px;
     }
 
-    .widget-header h2 { margin: 0 0 8px 0; font-weight: 600; }
-    .widget-header p { margin: 0; color: var(--on-surface-variant); font-size: 14px; }
+    .header h2 { margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #1f2937; }
+    .header p { margin: 0; color: var(--on-surface-variant); font-size: 15px; }
 
-    /* SVG Viewport */
-    .diagram-viewport {
-      background: var(--surface-dim);
+    /* SVG Canvas */
+    .viewport {
+      background: var(--surface);
+      border: 1px solid var(--stroke);
       border-radius: 12px;
-      border: 1px solid var(--stroke-default);
       padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
       overflow: hidden;
-      position: relative;
     }
 
-    .diagram-svg {
+    svg {
       width: 100%;
       height: auto;
       display: block;
       user-select: none;
     }
 
-    /* SVG Interactions */
-    .diag-node { cursor: pointer; transition: filter 0.2s; }
-    .diag-node:hover rect { filter: brightness(0.95); }
-    .diag-node.is-selected rect { stroke-width: 2.5px !important; }
-    .flow-particle { pointer-events: none; }
+    /* Node Styles */
+    .node { cursor: pointer; transition: all 0.2s ease; }
+    .node:hover rect { filter: brightness(0.95); }
+    .node.selected rect { stroke-width: 3px; filter: brightness(0.9); }
+    .node-text-title { font-size: 13px; font-weight: 600; fill: var(--on-surface); text-anchor: middle; pointer-events: none; }
+    .node-text-sub { font-size: 11px; fill: var(--on-surface-variant); text-anchor: middle; pointer-events: none; }
 
-    /* Details Panel */
-    .detail-card {
-      background: var(--surface-bright);
+    /* Edges and Particles */
+    .edge-path { fill: none; stroke: #9ca3af; stroke-width: 2px; }
+    .edge-label-bg { fill: var(--surface); stroke: var(--stroke); rx: 4px; }
+    .edge-label { font-size: 10px; font-weight: 500; fill: var(--on-surface-variant); text-anchor: middle; font-family: var(--ff-mono); pointer-events: none; }
+    .particle { pointer-events: none; }
+
+    /* Details Card */
+    .details-card {
+      background: var(--surface);
+      border: 1px solid var(--stroke);
       border-radius: 12px;
-      border: 1px solid var(--stroke-default);
-      padding: 20px;
+      padding: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
       min-height: 200px;
     }
 
-    .detail-header {
+    .details-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--stroke-default);
+      border-bottom: 1px solid var(--surface-container);
       padding-bottom: 12px;
     }
 
-    .detail-header h3 { margin: 0; font-size: 18px; }
-    .detail-tag {
+    .details-title { font-size: 18px; font-weight: 600; margin: 0; }
+    .badge {
       padding: 4px 12px;
-      border-radius: 999px;
-      font-family: var(--ff-mono);
+      border-radius: 9999px;
       font-size: 12px;
       font-weight: 600;
+      color: #fff;
     }
 
-    .detail-grid {
+    .details-desc { margin: 0; font-size: 14px; line-height: 1.5; color: var(--on-surface-variant); }
+    
+    .metrics-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 16px;
     }
 
-    .detail-item { display: flex; flex-direction: column; gap: 4px; }
-    .detail-label { font-family: var(--ff-mono); font-size: 11px; color: var(--on-surface-variant); text-transform: uppercase; }
-    .detail-value { font-size: 14px; }
+    .metric-box { display: flex; flex-direction: column; gap: 4px; }
+    .metric-label { font-size: 11px; text-transform: uppercase; font-weight: 600; color: #6b7280; letter-spacing: 0.05em; }
+    .metric-value { font-size: 14px; font-weight: 500; color: var(--on-surface); }
 
-    .code-snippet {
-      background: var(--surface-dim);
+    .code-block {
+      background: #1f2937;
+      color: #e5e7eb;
+      padding: 16px;
       border-radius: 8px;
-      padding: 12px;
       font-family: var(--ff-mono);
-      font-size: 12px;
+      font-size: 13px;
       overflow-x: auto;
-      border: 1px solid var(--stroke-default);
       margin: 0;
+      white-space: pre-wrap;
     }
 
     /* Legend */
@@ -122,7 +134,7 @@
       gap: 20px;
       margin-top: 16px;
       padding-top: 16px;
-      border-top: 1px dashed var(--stroke-default);
+      border-top: 1px dashed var(--stroke);
       font-size: 12px;
       font-family: var(--ff-mono);
     }
@@ -133,124 +145,267 @@
 <body>
 
 <div class="widget-container">
-  <header class="widget-header">
-    <h2>PII Redaction Workflow</h2>
-    <p>Secure, multi-source log ingestion with edge authentication and centralized PII scrubbing.</p>
-  </header>
+  <div class="header">
+    <h2>PII Redaction & Log Routing Workflow</h2>
+    <p>Interactive architecture diagram. Click any node to view configuration and processing details.</p>
+  </div>
 
-  <!-- SVG Interactive Canvas -->
-  <div class="diagram-viewport">
-    <svg class="diagram-svg" viewBox="0 0 800 350">
+  <div class="viewport">
+    <svg viewBox="0 0 860 400" id="diagram">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#666" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
         </marker>
       </defs>
-
+      
       <g id="edges-layer"></g>
       <g id="particles-layer"></g>
       <g id="nodes-layer"></g>
 
-      <!-- Static Labels for Groupings -->
-      <text x="100" y="20" font-family="sans-serif" font-size="12" fill="#666" text-anchor="middle" font-weight="bold">LOG SOURCES</text>
-      <text x="700" y="20" font-family="sans-serif" font-size="12" fill="#666" text-anchor="middle" font-weight="bold">DESTINATION SINKS</text>
+      <!-- Static Labels -->
+      <text x="100" y="20" font-family="sans-serif" font-size="12" fill="#6b7280" text-anchor="middle" font-weight="bold">LOG SOURCES</text>
+      <text x="790" y="20" font-family="sans-serif" font-size="12" fill="#6b7280" text-anchor="middle" font-weight="bold">DESTINATION SINKS</text>
     </svg>
-    
+
     <div class="legend-bar">
       <div class="legend-item"><div class="legend-swatch" style="background: var(--color-source)"></div> Raw Data</div>
-      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-envoy)"></div> Gateway</div>
-      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-otel)"></div> Processing</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-proxy)"></div> Gateway</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-core)"></div> Processing</div>
       <div class="legend-item"><div class="legend-swatch" style="background: var(--color-sink)"></div> Scrubbed Storage</div>
     </div>
   </div>
 
-  <!-- Detail Inspector Panel -->
-  <div class="detail-card">
-    <div class="detail-header">
-      <h3 id="node-title">Select a component</h3>
-      <span id="node-tag" class="detail-tag" style="background: #e3e3e3; color: #666;">-</span>
+  <div class="details-card" id="details">
+    <div class="details-header">
+      <h3 class="details-title" id="d-title">Select a component</h3>
+      <span class="badge" id="d-badge" style="background: #9ca3af;">System</span>
     </div>
-    <div id="node-desc" style="font-size: 14px; color: #333;">Click on any node in the diagram to inspect its role in the PII redaction pipeline.</div>
-    <div class="detail-grid" id="node-grid"></div>
+    <p class="details-desc" id="d-desc">Click on any node in the diagram above to inspect its role, configuration, and data schema.</p>
+    <div class="metrics-grid" id="d-metrics"></div>
     <div id="code-container" style="display: none; margin-top: 8px;">
-      <div class="detail-label">Configuration Example</div>
-      <pre class="code-snippet" id="node-code"></pre>
+      <div class="metric-label" style="margin-bottom: 8px;">Configuration Example</div>
+      <pre class="code-block" id="d-code"></pre>
     </div>
   </div>
 </div>
 
 <script>
-// --- Data Model ---
-const NODES = [
-  // Sources (Left Column)
-  { id: 'src-otel', title: 'OTel Agents', sub: 'Vendor Agnostic', tag: 'SOURCE', color: 'var(--color-source)', x: 20, y: 40, w: 160, h: 50,
-    desc: 'Application workloads instrumented with OpenTelemetry SDKs sending structured OTLP data.',
-    protocol: 'gRPC / HTTP (OTLP)', config: 'Endpoint: http://envoy:4317' },
-  { id: 'src-fluentd', title: 'Fluentd / Fluent Bit', sub: 'Edge Log Forwarders', tag: 'SOURCE', color: 'var(--color-source)', x: 20, y: 110, w: 160, h: 50,
-    desc: 'Daemonsets scraping Kubernetes node logs (/var/log/containers) and forwarding them.',
-    protocol: 'Fluent Forward Protocol', config: 'Output Plugin: forward' },
-  { id: 'src-syslog', title: 'Syslog / 3rd Party', sub: 'Legacy & Appliances', tag: 'SOURCE', color: 'var(--color-source)', x: 20, y: 180, w: 160, h: 50,
-    desc: 'Network switches, firewalls, and legacy VMs sending unstructured text logs.',
-    protocol: 'TCP/UDP 514 (RFC 5424)', config: 'Target: envoy.internal:514' },
-
-  // Gateway (Center-Left)
-  { id: 'envoy', title: 'Envoy Proxy Shield', sub: 'Auth & Rate Limiting', tag: 'INGRESS', color: 'var(--color-envoy)', x: 250, y: 110, w: 160, h: 50,
-    desc: 'L4/L7 gateway that intercepts all incoming traffic, validates tenant API keys, enforces rate limits, and injects tenancy headers.',
-    protocol: 'mTLS / HTTP2', 
-    config: 'filter_chain:\n  - name: envoy.filters.http.ext_authz\n  - name: envoy.filters.http.router' },
-
-  // Processor (Center-Right)
-  { id: 'otel-core', title: 'OTel Redaction Engine', sub: 'PII Regex & Masking', tag: 'COMPUTE', color: 'var(--color-otel)', x: 450, y: 90, w: 170, h: 90,
-    desc: 'Centralized worker pool executing SIMD-accelerated regex (Aho-Corasick) to scrub SSNs, Credit Cards, and Emails before storage.',
-    protocol: 'Internal Cluster Mesh',
-    config: 'processors:\n  transform/pii:\n    statements:\n      - replace_pattern(body, "\\\\d{4}-\\\\d{4}-\\\\d{4}-", "****-****-****-")' },
-
-  // Sinks (Right Column)
-  { id: 'sink-es', title: 'Elasticsearch', sub: 'Log Explorer', tag: 'SINK', color: 'var(--color-sink)', x: 670, y: 40, w: 110, h: 50,
-    desc: 'Indexed storage for real-time observability and dashboarding (Grafana).', protocol: 'HTTP Bulk API' },
-  { id: 'sink-ch', title: 'ClickHouse', sub: 'High-Volume OLAP', tag: 'SINK', color: 'var(--color-sink)', x: 670, y: 110, w: 110, h: 50,
-    desc: 'Columnar storage for massive scale analytics and aggregation queries.', protocol: 'TCP Native / HTTP' },
-  { id: 'sink-s3', title: 'S3 Archive', sub: 'Cold Compliance', tag: 'SINK', color: 'var(--color-sink)', x: 670, y: 180, w: 110, h: 50,
-    desc: 'Parquet-formatted object storage for long term compliance retention.', protocol: 'AWS S3 REST API' }
-];
-
-const EDGES = [
-  // Sources to Envoy
-  { from: 'src-otel', to: 'envoy', color: 'var(--color-source)' },
-  { from: 'src-fluentd', to: 'envoy', color: 'var(--color-source)' },
-  { from: 'src-syslog', to: 'envoy', color: 'var(--color-source)' },
-  // Envoy to Processor
-  { from: 'envoy', to: 'otel-core', color: 'var(--color-envoy)', label: 'Validated Payload' },
-  // Processor to Sinks (Parallel)
-  { from: 'otel-core', to: 'sink-es', color: 'var(--color-sink)' },
-  { from: 'otel-core', to: 'sink-ch', color: 'var(--color-sink)' },
-  { from: 'otel-core', to: 'sink-s3', color: 'var(--color-sink)' }
-];
-
-// --- Rendering Logic ---
-const ns = 'http://www.w3.org/2000/svg';
-const nodesLayer = document.getElementById('nodes-layer');
-const edgesLayer = document.getElementById('edges-layer');
-const particlesLayer = document.getElementById('particles-layer');
-let particles = [];
-
-// Helper to get connection points
-function getPoints(fromNode, toNode) {
-  const startX = fromNode.x + fromNode.w;
-  const startY = fromNode.y + (fromNode.h / 2);
-  const endX = toNode.x;
-  const endY = toNode.y + (toNode.h / 2);
-  return { startX, startY, endX, endY };
-}
-
-function initDiagram() {
-  // Draw Edges
-  EDGES.forEach((edge, i) => {
-    const fromNode = NODES.find(n => n.id === edge.from);
-    const toNode = NODES.find(n => n.id === edge.to);
-    const { startX, startY, endX, endY } = getPoints(fromNode, toNode);
+  // Node Definitions
+  const NODES = [
+    { id: 'src-otel', x: 20, y: 40, w: 140, h: 50, color: 'var(--color-source)', title: 'OTel Collector', sub: 'Vendor Agnostic', type: 'Ingress Source', 
+      desc: 'Edge OpenTelemetry collector gathering infrastructure metrics and logs agnostically.', 
+      protocol: 'OTLP / gRPC', schema: 'OpenTelemetry v1.0', 
+      code: 'exporters:\n  otlphttp:\n    endpoint: "https://envoy.internal:443/v1/logs"\n    headers:\n      "x-api-key": "${API_KEY}"' },
+    { id: 'src-fluentd', x: 20, y: 110, w: 140, h: 50, color: 'var(--color-source)', title: 'Fluentd', sub: 'Container Logs', type: 'Ingress Source', 
+      desc: 'DaemonSet collecting Kubernetes pod stdout/stderr logs.', 
+      protocol: 'Fluent Forward', schema: 'JSON Payload', 
+      code: '<match **>\n  @type http\n  endpoint https://envoy.internal/fluentd\n  <headers>\n    x-api-key ${API_KEY}\n  </headers>\n</match>' },
+    { id: 'src-syslog', x: 20, y: 180, w: 140, h: 50, color: 'var(--color-source)', title: 'Syslog', sub: 'Network Devices', type: 'Ingress Source', 
+      desc: 'Traditional network appliances and legacy VMs sending UDP/TCP syslog.', 
+      protocol: 'RFC 5424', schema: 'Syslog Format', 
+      code: '*.* @@envoy.internal:514' },
+    { id: 'src-3rdparty', x: 20, y: 250, w: 140, h: 50, color: 'var(--color-source)', title: '3rd Party Tools', sub: 'Webhooks & APIs', type: 'Ingress Source', 
+      desc: 'External SaaS platforms pushing audit logs via HTTP webhooks.', 
+      protocol: 'HTTP POST', schema: 'Custom JSON', 
+      code: 'curl -X POST https://envoy.internal/v1/bulk \\\n  -H "x-api-key: secret-key" \\\n  -d \'{"event": "login"}\'' },
     
-    const pathD = `M ${startX} ${startY} C ${startX + 40} ${startY}, ${endX - 40} ${endY}, ${endX - 5} ${endY}`;
+    { id: 'envoy', x: 260, y: 135, w: 140, h: 70, color: 'var(--color-proxy)', title: 'Envoy Proxy', sub: 'API Auth & Rate Limit', type: 'Gateway', 
+      desc: 'L7 edge proxy that validates `x-api-key` headers, drops unauthenticated traffic, and translates protocols into canonical OTLP envelopes.', 
+      protocol: 'HTTPS / mTLS', schema: 'Header Validation', 
+      code: 'filters:\n- name: envoy.filters.http.ext_authz\n  typed_config:\n    "@type": type.googleapis.com/envoy...ExtAuthz\n    http_service:\n      server_uri: cluster_authz' },
 
+    { id: 'core-otel', x: 500, y: 125, w: 160, h: 90, color: 'var(--color-core)', title: 'Core OTel Collector', sub: 'PII Redaction Engine', type: 'Processing Core', 
+      desc: 'Central pipeline running the `transform` processor. Uses Regex/DFA to scrub credit cards, emails, and SSNs before routing.', 
+      protocol: 'OTLP Engine', schema: 'Scrubbed ECS/OTLP', 
+      code: 'processors:\n  transform/pii:\n    error_mode: ignore\n    log_statements:\n      - context: log\n        statements:\n          - replace_pattern(body, "\\\\b\\\\d{4}-\\\\d{4}-\\\\d{4}-\\\\d{4}\\\\b", "[REDACTED_CC]")' },
 
-http://googleusercontent.com/generated_video_content/9616991154206847593
+    { id: 'sink-elastic', x: 730, y: 40, w: 120, h: 50, color: 'var(--color-sink)', title: 'Elasticsearch', sub: 'SIEM & Search', type: 'Analytics Sink', 
+      desc: 'Hot tier storage for fast Lucene querying, security alerts, and Grafana dashboards.', 
+      protocol: 'Elastic Bulk API', schema: 'Indexed JSON', code: 'exporters:\n  elasticsearch:\n    endpoints: ["http://es:9200"]' },
+    { id: 'sink-clickhouse', x: 730, y: 145, w: 120, h: 50, color: 'var(--color-sink)', title: 'ClickHouse', sub: 'OLAP Analytics', type: 'Analytics Sink', 
+      desc: 'Columnar database for high-throughput aggregation and long-term trend analysis.', 
+      protocol: 'ClickHouse TCP/HTTP', schema: 'Columnar Format', code: 'exporters:\n  clickhouse:\n    endpoint: "tcp://clickhouse:9000"' },
+    { id: 'sink-s3', x: 730, y: 250, w: 120, h: 50, color: 'var(--color-sink)', title: 'AWS S3', sub: 'Cold Data Lake', type: 'Archival Sink', 
+      desc: 'Long-term compliance archival stored as compressed Parquet files.', 
+      protocol: 'S3 API / HTTPS', schema: 'ZSTD Parquet', code: 'exporters:\n  awss3:\n    s3_destination: "s3://compliance-logs-archive"' }
+  ];
+
+  const EDGES = [
+    { from: 'src-otel', to: 'envoy', label: '' },
+    { from: 'src-fluentd', to: 'envoy', label: '' },
+    { from: 'src-syslog', to: 'envoy', label: '' },
+    { from: 'src-3rdparty', to: 'envoy', label: '' },
+    { from: 'envoy', to: 'core-otel', label: 'Auth\'d Payload' },
+    { from: 'core-otel', to: 'sink-elastic', label: 'Scrubbed' },
+    { from: 'core-otel', to: 'sink-clickhouse', label: 'Scrubbed' },
+    { from: 'core-otel', to: 'sink-s3', label: 'Scrubbed' }
+  ];
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const nodesLayer = document.getElementById('nodes-layer');
+  const edgesLayer = document.getElementById('edges-layer');
+  const particlesLayer = document.getElementById('particles-layer');
+  let selectedId = 'core-otel';
+  let particles = [];
+
+  function getPath(n1, n2) {
+    const x1 = n1.x + n1.w;
+    const y1 = n1.y + n1.h / 2;
+    const x2 = n2.x;
+    const y2 = n2.y + n2.h / 2;
+    const cpX = x1 + (x2 - x1) / 2;
+    return `M ${x1} ${y1} C ${cpX} ${y1}, ${cpX} ${y2}, ${x2} ${y2}`;
+  }
+
+  function draw() {
+    nodesLayer.innerHTML = '';
+    edgesLayer.innerHTML = '';
+    
+    // Render Edges
+    EDGES.forEach(edge => {
+      const n1 = NODES.find(n => n.id === edge.from);
+      const n2 = NODES.find(n => n.id === edge.to);
+      const d = getPath(n1, n2);
+
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', 'edge-path');
+      path.setAttribute('id', `path-${edge.from}-${edge.to}`);
+      path.setAttribute('marker-end', 'url(#arrow)');
+      edgesLayer.appendChild(path);
+
+      if (edge.label) {
+        const midX = n1.x + n1.w + (n2.x - (n1.x + n1.w)) / 2;
+        const midY = n1.y + n1.h/2 + (n2.y + n2.h/2 - (n1.y + n1.h/2)) / 2;
+        
+        const text = document.createElementNS(ns, 'text');
+        text.setAttribute('x', midX);
+        text.setAttribute('y', midY - 6);
+        text.setAttribute('class', 'edge-label');
+        text.textContent = edge.label;
+        edgesLayer.appendChild(text);
+      }
+    });
+
+    // Render Nodes
+    NODES.forEach(n => {
+      const g = document.createElementNS(ns, 'g');
+      g.setAttribute('class', `node ${n.id === selectedId ? 'selected' : ''}`);
+      g.setAttribute('transform', `translate(${n.x}, ${n.y})`);
+      g.onclick = () => selectNode(n.id);
+
+      const rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('width', n.w);
+      rect.setAttribute('height', n.h);
+      rect.setAttribute('rx', 8);
+      rect.setAttribute('fill', '#ffffff');
+      rect.setAttribute('stroke', n.color);
+      rect.setAttribute('stroke-width', '1.5');
+      
+      const bar = document.createElementNS(ns, 'rect');
+      bar.setAttribute('width', 6);
+      bar.setAttribute('height', n.h);
+      bar.setAttribute('rx', 3);
+      bar.setAttribute('fill', n.color);
+
+      const title = document.createElementNS(ns, 'text');
+      title.setAttribute('x', n.w / 2 + 4);
+      title.setAttribute('y', n.h / 2 - 4);
+      title.setAttribute('class', 'node-text-title');
+      title.textContent = n.title;
+
+      const sub = document.createElementNS(ns, 'text');
+      sub.setAttribute('x', n.w / 2 + 4);
+      sub.setAttribute('y', n.h / 2 + 12);
+      sub.setAttribute('class', 'node-text-sub');
+      sub.textContent = n.sub;
+
+      g.appendChild(rect);
+      g.appendChild(bar);
+      g.appendChild(title);
+      g.appendChild(sub);
+      nodesLayer.appendChild(g);
+    });
+  }
+
+  function selectNode(id) {
+    selectedId = id;
+    draw();
+
+    const n = NODES.find(node => node.id === id);
+    document.getElementById('d-title').textContent = n.title;
+    
+    const badge = document.getElementById('d-badge');
+    badge.textContent = n.type;
+    badge.style.background = n.color;
+
+    document.getElementById('d-desc').textContent = n.desc;
+    
+    document.getElementById('d-metrics').innerHTML = `
+      <div class="metric-box">
+        <span class="metric-label">Ingress Protocol</span>
+        <span class="metric-value">${n.protocol}</span>
+      </div>
+      <div class="metric-box">
+        <span class="metric-label">Data Schema</span>
+        <span class="metric-value">${n.schema}</span>
+      </div>
+    `;
+
+    const codeContainer = document.getElementById('code-container');
+    const codeBlock = document.getElementById('d-code');
+    if (n.code) {
+      codeContainer.style.display = 'block';
+      codeBlock.textContent = n.code;
+    } else {
+      codeContainer.style.display = 'none';
+    }
+  }
+
+  function initParticles() {
+    particles = [];
+    EDGES.forEach((edge, idx) => {
+      const pathEl = document.getElementById(`path-${edge.from}-${edge.to}`);
+      if (!pathEl) return;
+      
+      const len = pathEl.getTotalLength();
+      const color = NODES.find(n => n.id === edge.to).color;
+      
+      particles.push({ pathEl, len, color, progress: 0, speed: 0.003 + (Math.random() * 0.002) });
+      particles.push({ pathEl, len, color, progress: 0.5, speed: 0.003 + (Math.random() * 0.002) });
+    });
+  }
+
+  function animate() {
+    particlesLayer.innerHTML = ''; 
+
+    particles.forEach(p => {
+      p.progress += p.speed;
+      if (p.progress > 1) p.progress = 0;
+      
+      const pt = p.pathEl.getPointAtLength(p.progress * p.len);
+      
+      const circle = document.createElementNS(ns, 'circle');
+      circle.setAttribute('cx', pt.x);
+      circle.setAttribute('cy', pt.y);
+      circle.setAttribute('r', 4);
+      circle.setAttribute('fill', p.color);
+      circle.setAttribute('class', 'particle');
+      
+      const opacity = Math.sin(p.progress * Math.PI) * 0.8 + 0.2;
+      circle.setAttribute('opacity', opacity);
+      
+      particlesLayer.appendChild(circle);
+    });
+
+    requestAnimationFrame(animate);
+  }
+
+  // Startup
+  draw();
+  initParticles();
+  selectNode('core-otel');
+  animate();
+</script>
+</body>
+</html>
