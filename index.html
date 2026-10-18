@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PII Redaction Workflow</title>
+  <style>
+    /* Base Styling and Variables */
+    :root {
+      --ff-sans: system-ui, -apple-system, sans-serif;
+      --ff-mono: monospace;
+      --surface-bright: #ffffff;
+      --surface-dim: #f2f0f0;
+      --stroke-default: #e3e3e3;
+      --on-surface: #000000;
+      --on-surface-variant: rgba(0, 0, 0, 0.55);
+      
+      /* Node Colors */
+      --color-source: #c84288;
+      --color-envoy: #2575fc;
+      --color-otel: #705ec2;
+      --color-sink: #228a49;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #fafafa;
+      font-family: var(--ff-sans);
+      color: var(--on-surface);
+    }
+
+    .widget-container {
+      width: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .widget-header h2 { margin: 0 0 8px 0; font-weight: 600; }
+    .widget-header p { margin: 0; color: var(--on-surface-variant); font-size: 14px; }
+
+    /* SVG Viewport */
+    .diagram-viewport {
+      background: var(--surface-dim);
+      border-radius: 12px;
+      border: 1px solid var(--stroke-default);
+      padding: 20px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .diagram-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      user-select: none;
+    }
+
+    /* SVG Interactions */
+    .diag-node { cursor: pointer; transition: filter 0.2s; }
+    .diag-node:hover rect { filter: brightness(0.95); }
+    .diag-node.is-selected rect { stroke-width: 2.5px !important; }
+    .flow-particle { pointer-events: none; }
+
+    /* Details Panel */
+    .detail-card {
+      background: var(--surface-bright);
+      border-radius: 12px;
+      border: 1px solid var(--stroke-default);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 200px;
+    }
+
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--stroke-default);
+      padding-bottom: 12px;
+    }
+
+    .detail-header h3 { margin: 0; font-size: 18px; }
+    .detail-tag {
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-family: var(--ff-mono);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+
+    .detail-item { display: flex; flex-direction: column; gap: 4px; }
+    .detail-label { font-family: var(--ff-mono); font-size: 11px; color: var(--on-surface-variant); text-transform: uppercase; }
+    .detail-value { font-size: 14px; }
+
+    .code-snippet {
+      background: var(--surface-dim);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: var(--ff-mono);
+      font-size: 12px;
+      overflow-x: auto;
+      border: 1px solid var(--stroke-default);
+      margin: 0;
+    }
+
+    /* Legend */
+    .legend-bar {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--stroke-default);
+      font-size: 12px;
+      font-family: var(--ff-mono);
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<div class="widget-container">
+  <header class="widget-header">
+    <h2>PII Redaction Workflow</h2>
+    <p>Secure, multi-source log ingestion with edge authentication and centralized PII scrubbing.</p>
+  </header>
+
+  <!-- SVG Interactive Canvas -->
+  <div class="diagram-viewport">
+    <svg class="diagram-svg" viewBox="0 0 800 350">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#666" />
+        </marker>
+      </defs>
+
+      <g id="edges-layer"></g>
+      <g id="particles-layer"></g>
+      <g id="nodes-layer"></g>
+
+      <!-- Static Labels for Groupings -->
+      <text x="100" y="20" font-family="sans-serif" font-size="12" fill="#666" text-anchor="middle" font-weight="bold">LOG SOURCES</text>
+      <text x="700" y="20" font-family="sans-serif" font-size="12" fill="#666" text-anchor="middle" font-weight="bold">DESTINATION SINKS</text>
+    </svg>
+    
+    <div class="legend-bar">
+      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-source)"></div> Raw Data</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-envoy)"></div> Gateway</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-otel)"></div> Processing</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: var(--color-sink)"></div> Scrubbed Storage</div>
+    </div>
+  </div>
+
+  <!-- Detail Inspector Panel -->
+  <div class="detail-card">
+    <div class="detail-header">
+      <h3 id="node-title">Select a component</h3>
+      <span id="node-tag" class="detail-tag" style="background: #e3e3e3; color: #666;">-</span>
+    </div>
+    <div id="node-desc" style="font-size: 14px; color: #333;">Click on any node in the diagram to inspect its role in the PII redaction pipeline.</div>
+    <div class="detail-grid" id="node-grid"></div>
+    <div id="code-container" style="display: none; margin-top: 8px;">
+      <div class="detail-label">Configuration Example</div>
+      <pre class="code-snippet" id="node-code"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- Data Model ---
+const NODES = [
+  // Sources (Left Column)
+  { id: 'src-otel', title: 'OTel Agents', sub: 'Vendor Agnostic', tag: 'SOURCE', color: 'var(--color-source)', x: 20, y: 40, w: 160, h: 50,
+    desc: 'Application workloads instrumented with OpenTelemetry SDKs sending structured OTLP data.',
+    protocol: 'gRPC / HTTP (OTLP)', config: 'Endpoint: http://envoy:4317' },
+  { id: 'src-fluentd', title: 'Fluentd / Fluent Bit', sub: 'Edge Log Forwarders', tag: 'SOURCE', color: 'var(--color-source)', x: 20, y: 110, w: 160, h: 50,
+    desc: 'Daemonsets scraping Kubernetes node logs (/var/log/containers) and forwarding them.',
+    protocol: 'Fluent Forward Protocol', config: 'Output Plugin: forward' },
+  { id: 'src-syslog', title: 'Syslog / 3rd Party', sub: 'Legacy & Appliances', tag: 'SOURCE', color: 'var(--color-source)', x: 20, y: 180, w: 160, h: 50,
+    desc: 'Network switches, firewalls, and legacy VMs sending unstructured text logs.',
+    protocol: 'TCP/UDP 514 (RFC 5424)', config: 'Target: envoy.internal:514' },
+
+  // Gateway (Center-Left)
+  { id: 'envoy', title: 'Envoy Proxy Shield', sub: 'Auth & Rate Limiting', tag: 'INGRESS', color: 'var(--color-envoy)', x: 250, y: 110, w: 160, h: 50,
+    desc: 'L4/L7 gateway that intercepts all incoming traffic, validates tenant API keys, enforces rate limits, and injects tenancy headers.',
+    protocol: 'mTLS / HTTP2', 
+    config: 'filter_chain:\n  - name: envoy.filters.http.ext_authz\n  - name: envoy.filters.http.router' },
+
+  // Processor (Center-Right)
+  { id: 'otel-core', title: 'OTel Redaction Engine', sub: 'PII Regex & Masking', tag: 'COMPUTE', color: 'var(--color-otel)', x: 450, y: 90, w: 170, h: 90,
+    desc: 'Centralized worker pool executing SIMD-accelerated regex (Aho-Corasick) to scrub SSNs, Credit Cards, and Emails before storage.',
+    protocol: 'Internal Cluster Mesh',
+    config: 'processors:\n  transform/pii:\n    statements:\n      - replace_pattern(body, "\\\\d{4}-\\\\d{4}-\\\\d{4}-", "****-****-****-")' },
+
+  // Sinks (Right Column)
+  { id: 'sink-es', title: 'Elasticsearch', sub: 'Log Explorer', tag: 'SINK', color: 'var(--color-sink)', x: 670, y: 40, w: 110, h: 50,
+    desc: 'Indexed storage for real-time observability and dashboarding (Grafana).', protocol: 'HTTP Bulk API' },
+  { id: 'sink-ch', title: 'ClickHouse', sub: 'High-Volume OLAP', tag: 'SINK', color: 'var(--color-sink)', x: 670, y: 110, w: 110, h: 50,
+    desc: 'Columnar storage for massive scale analytics and aggregation queries.', protocol: 'TCP Native / HTTP' },
+  { id: 'sink-s3', title: 'S3 Archive', sub: 'Cold Compliance', tag: 'SINK', color: 'var(--color-sink)', x: 670, y: 180, w: 110, h: 50,
+    desc: 'Parquet-formatted object storage for long term compliance retention.', protocol: 'AWS S3 REST API' }
+];
+
+const EDGES = [
+  // Sources to Envoy
+  { from: 'src-otel', to: 'envoy', color: 'var(--color-source)' },
+  { from: 'src-fluentd', to: 'envoy', color: 'var(--color-source)' },
+  { from: 'src-syslog', to: 'envoy', color: 'var(--color-source)' },
+  // Envoy to Processor
+  { from: 'envoy', to: 'otel-core', color: 'var(--color-envoy)', label: 'Validated Payload' },
+  // Processor to Sinks (Parallel)
+  { from: 'otel-core', to: 'sink-es', color: 'var(--color-sink)' },
+  { from: 'otel-core', to: 'sink-ch', color: 'var(--color-sink)' },
+  { from: 'otel-core', to: 'sink-s3', color: 'var(--color-sink)' }
+];
+
+// --- Rendering Logic ---
+const ns = 'http://www.w3.org/2000/svg';
+const nodesLayer = document.getElementById('nodes-layer');
+const edgesLayer = document.getElementById('edges-layer');
+const particlesLayer = document.getElementById('particles-layer');
+let particles = [];
+
+// Helper to get connection points
+function getPoints(fromNode, toNode) {
+  const startX = fromNode.x + fromNode.w;
+  const startY = fromNode.y + (fromNode.h / 2);
+  const endX = toNode.x;
+  const endY = toNode.y + (toNode.h / 2);
+  return { startX, startY, endX, endY };
+}
+
+function initDiagram() {
+  // Draw Edges
+  EDGES.forEach((edge, i) => {
+    const fromNode = NODES.find(n => n.id === edge.from);
+    const toNode = NODES.find(n => n.id === edge.to);
+    const { startX, startY, endX, endY } = getPoints(fromNode, toNode);
+    
+    const pathD = `M ${startX} ${startY} C ${startX + 40} ${startY}, ${endX - 40} ${endY}, ${endX - 5} ${endY}`;
+
+
+http://googleusercontent.com/generated_video_content/9616991154206847593
