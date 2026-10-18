@@ -1,0 +1,141 @@
+# =============================================================================
+# ENVOY  -  front door: authorise (x-api-key) + route (by path) + observe
+#
+#   client key (x-api-key)   path                    destination        token Envoy injects (Authorization: Bearer ...)
+#   ----------------------   ----------------------  -----------------  -----------------------------------------------
+#   router-key-demo          /v1/logs                otel-router        router-token-demo
+#   pii-key-demo             /pii/v1/logs            otel-agent-pii     pii-agent-token-demo
+#   filter-key-demo          /filter/v1/logs         otel-agent-filter  filter-agent-token-demo
+#   (anything else on those paths)                   -> 401
+#   (everything else)                                -> Grafana UI
+#
+# Two layers of keys: clients only ever know their own key; backends only
+# accept the token Envoy injects, so nobody can bypass Envoy.
+# DEMO ONLY: keys are inline. In production render this file from a Secret
+# (initContainer + envsubst) or use SDS / ext_authz. Keep values in sync with
+# deploy/k8s/secrets.example.yaml.
+# =============================================================================
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }   # stats: kubectl port-forward <pod> 9901
+
+static_resources:
+  listeners:
+  - name: listener_80
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 8080 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          # one JSON line per request: who was routed where and with which result (api key is never logged)
+          access_log:
+          - name: envoy.access_loggers.stdout
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+              log_format:
+                json_format:
+                  time: "%START_TIME%"
+                  method: "%REQ(:METHOD)%"
+                  path: "%REQ(:PATH)%"
+                  status: "%RESPONSE_CODE%"
+                  upstream: "%UPSTREAM_CLUSTER%"
+                  duration_ms: "%DURATION%"
+                  bytes_in: "%BYTES_RECEIVED%"
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: backend_services
+              domains: ["*"]
+              routes:
+              # ---- 1. router key -> router (severity routing happens inside the collector)
+              - match:
+                  path: "/v1/logs"
+                  headers:
+                  - name: "x-api-key"
+                    string_match: { exact: "router-key-demo" }
+                route:
+                  cluster: otel_router
+                request_headers_to_add:
+                - header: { key: "Authorization", value: "Bearer router-token-demo" }
+                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                request_headers_to_remove: ["x-api-key"]
+              # ---- 2. pii key -> PII agent directly
+              - match:
+                  path: "/pii/v1/logs"
+                  headers:
+                  - name: "x-api-key"
+                    string_match: { exact: "pii-key-demo" }
+                route:
+                  cluster: otel_agent_pii
+                  regex_rewrite:
+                    pattern: { regex: "^/pii/" }
+                    substitution: "/"
+                request_headers_to_add:
+                - header: { key: "Authorization", value: "Bearer pii-agent-token-demo" }
+                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                request_headers_to_remove: ["x-api-key"]
+              # ---- 3. filter key -> filtering agent directly
+              - match:
+                  path: "/filter/v1/logs"
+                  headers:
+                  - name: "x-api-key"
+                    string_match: { exact: "filter-key-demo" }
+                route:
+                  cluster: otel_agent_filter
+                  regex_rewrite:
+                    pattern: { regex: "^/filter/" }
+                    substitution: "/"
+                request_headers_to_add:
+                - header: { key: "Authorization", value: "Bearer filter-agent-token-demo" }
+                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                request_headers_to_remove: ["x-api-key"]
+              # ---- 4. any other telemetry call: reject
+              - match:
+                  safe_regex: { regex: "^/((pii|filter)/)?v1/.*" }
+                direct_response:
+                  status: 401
+                  body: { inline_string: "HTTP 401 Unauthorized: invalid or missing x-api-key for this path\n" }
+              # ---- 5. UI traffic -> Grafana
+              - match: { prefix: "/" }
+                route: { cluster: grafana_backend }
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+  - name: grafana_backend
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: grafana_backend
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: grafana.application-demo.svc.cluster.local, port_value: 80 } } }
+  - name: otel_router
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: otel_router
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: otel-router.application-demo.svc.cluster.local, port_value: 4318 } } }
+  - name: otel_agent_pii
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: otel_agent_pii
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: otel-agent-pii.application-demo.svc.cluster.local, port_value: 4318 } } }
+  - name: otel_agent_filter
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: otel_agent_filter
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: otel-agent-filter.application-demo.svc.cluster.local, port_value: 4318 } } }

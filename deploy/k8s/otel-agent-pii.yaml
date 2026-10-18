@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-agent-pii
+  namespace: application-demo
+  labels: {app: otel-agent-pii}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: otel-agent-pii}
+  template:
+    metadata:
+      labels: {app: otel-agent-pii}
+      annotations:                       # scrape the collector's own metrics
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.116.0   # router needs >= 0.106 (log-context routing)
+        args: ["--config=/etc/otelcol/config.yaml"]
+        env:
+        - name: PII_AGENT_TOKEN
+          valueFrom: {secretKeyRef: {name: log-pipeline-secrets, key: PII_AGENT_TOKEN}}
+        - {name: ES_ENDPOINT, value: "https://elasticsearch-master.application-demo.svc.cluster.local:9200"}
+        - name: ES_API_KEY_DEBUG
+          valueFrom: {secretKeyRef: {name: log-pipeline-secrets, key: ES_API_KEY_DEBUG}}
+        ports:
+        - {name: otlp-http, containerPort: 4318}
+        - {name: metrics,   containerPort: 8888}
+        - {name: health,    containerPort: 13133}
+        - {name: zpages,    containerPort: 55679}
+        readinessProbe: {httpGet: {path: /, port: 13133}, periodSeconds: 5}
+        livenessProbe:  {httpGet: {path: /, port: 13133}, initialDelaySeconds: 10, periodSeconds: 10}
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits:   {cpu: 500m, memory: 512Mi}
+        volumeMounts:
+        - {name: config, mountPath: /etc/otelcol/config.yaml, subPath: config.yaml}
+      volumes:
+      - name: config
+        configMap: {name: otel-agent-pii-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-agent-pii
+  namespace: application-demo
+spec:
+  selector: {app: otel-agent-pii}
+  ports:
+  - {name: otlp-http, port: 4318, targetPort: 4318}
+  - {name: metrics,   port: 8888, targetPort: 8888}

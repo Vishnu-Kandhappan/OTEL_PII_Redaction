@@ -1,0 +1,89 @@
+# =============================================================================
+# ROUTER  (gateway)  -  "one entrance, many destinations"
+#   Envoy -> [router] -> pii agent      (DEBUG / TRACE)
+#                     -> filter agent   (WARN / ERROR / FATAL)
+#                     -> dropped        (INFO and unknown, logged by debug exporter)
+# Envoy cannot look inside an OTLP payload, so severity routing happens here
+# using the `routing` connector (OTTL conditions evaluated per log record).
+# =============================================================================
+extensions:
+  bearertokenauth/in:                 # who may call the router (Envoy injects this token)
+    token: ${env:ROUTER_TOKEN}
+  health_check:
+    endpoint: 0.0.0.0:13133
+  zpages:
+    endpoint: 0.0.0.0:55679           # http://<pod>:55679/debug/pipelinez
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: bearertokenauth/in
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+  batch:
+    timeout: 1s
+
+connectors:
+  routing:
+    error_mode: ignore
+    match_once: true                              # first matching rule wins (required for log context)
+    default_pipelines: [logs/unrouted]            # anything that matches no rule
+    table:
+      - context: log
+        statement: route() where severity_number >= SEVERITY_NUMBER_TRACE and severity_number < SEVERITY_NUMBER_INFO
+        pipelines: [logs/to-pii]
+      - context: log
+        statement: route() where severity_number >= SEVERITY_NUMBER_WARN
+        pipelines: [logs/to-filter]
+      # fallback for senders that only set severity_text and not severity_number
+      - context: log
+        statement: route() where severity_number == SEVERITY_NUMBER_UNSPECIFIED and IsMatch(severity_text, "(?i)^(trace|debug)$")
+        pipelines: [logs/to-pii]
+      - context: log
+        statement: route() where severity_number == SEVERITY_NUMBER_UNSPECIFIED and IsMatch(severity_text, "(?i)^(warn|warning|error|fatal|critical)$")
+        pipelines: [logs/to-filter]
+
+exporters:
+  # One exporter per destination -> one API key per destination.
+  otlphttp/pii:
+    endpoint: http://otel-agent-pii:4318
+    headers:
+      Authorization: "Bearer ${env:PII_AGENT_TOKEN}"
+  otlphttp/filter:
+    endpoint: http://otel-agent-filter:4318
+    headers:
+      Authorization: "Bearer ${env:FILTER_AGENT_TOKEN}"
+  debug/unrouted:
+    verbosity: basic
+
+service:
+  extensions: [bearertokenauth/in, health_check, zpages]
+  pipelines:
+    logs/in:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [routing]
+    logs/to-pii:
+      receivers: [routing]
+      processors: [batch]
+      exporters: [otlphttp/pii]
+    logs/to-filter:
+      receivers: [routing]
+      processors: [batch]
+      exporters: [otlphttp/filter]
+    logs/unrouted:
+      receivers: [routing]
+      exporters: [debug/unrouted]
+  telemetry:                          # self-observability: Prometheus metrics of the collector itself
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+    logs:
+      level: info

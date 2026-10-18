@@ -1,0 +1,18 @@
+# kubectl apply -k .      (configs under agents/ and deploy/envoy/ are the single source of truth)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: application-demo
+resources:
+- deploy/k8s/envoy-ingress.yaml
+- deploy/k8s/otel-router.yaml
+- deploy/k8s/otel-agent-pii.yaml
+- deploy/k8s/otel-agent-filter.yaml
+configMapGenerator:          # content hash in the name => pods roll automatically when a config changes
+- name: envoy-ingress-config
+  files: [envoy.yaml=deploy/envoy/envoy.yaml]
+- name: otel-router-config
+  files: [config.yaml=agents/otel-collector/router/config.yaml]
+- name: otel-agent-pii-config
+  files: [config.yaml=agents/otel-collector/pii-redaction/config.yaml]
+- name: otel-agent-filter-config
+  files: [config.yaml=agents/otel-collector/filtering/config.yaml]

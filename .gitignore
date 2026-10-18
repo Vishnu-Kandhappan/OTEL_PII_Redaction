@@ -1,0 +1,3 @@
+deploy/k8s/secrets.yaml
+*.log
+__pycache__/

@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-ingress
+  namespace: application-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: envoy-ingress}
+  template:
+    metadata:
+      labels: {app: envoy-ingress}
+    spec:
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.30.0
+        args: ["-c", "/etc/envoy/envoy.yaml"]
+        ports:
+        - {containerPort: 8080}
+        volumeMounts:
+        - {name: envoy-config-volume, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml}
+      volumes:
+      - name: envoy-config-volume
+        configMap: {name: envoy-ingress-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-ingress-svc
+  namespace: application-demo
+spec:
+  type: NodePort
+  selector: {app: envoy-ingress}
+  ports:
+  - {protocol: TCP, port: 80, targetPort: 8080, nodePort: 32080}

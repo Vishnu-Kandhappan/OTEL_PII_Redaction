@@ -1,0 +1,78 @@
+# =============================================================================
+# PII REDACTION AGENT  -  receives DEBUG logs, masks PII, ships to Elastic
+# Order matters: specific patterns (email, SSN, card) run BEFORE the loose
+# phone pattern so that a card number is not half-eaten as a phone number.
+# =============================================================================
+extensions:
+  bearertokenauth/in:
+    token: ${env:PII_AGENT_TOKEN}
+  health_check:
+    endpoint: 0.0.0.0:13133
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: bearertokenauth/in
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  transform/redact:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # ---- 1. free text in the log body --------------------------------
+          - replace_pattern(body, "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "[REDACTED_EMAIL]")
+          - replace_pattern(body, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+          - replace_pattern(body, "\\b(?:\\d{4}[ -]?){3}\\d{4}\\b", "[REDACTED_CC]")
+          - replace_pattern(body, "(?:\\+\\d{1,3}[\\s.-]?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}\\b", "[REDACTED_PHONE]")
+          - replace_pattern(body, "\\b\\d{4}-\\d{2}-\\d{2}\\b", "[REDACTED_DATE]")
+          # ---- 2. every attribute VALUE that contains the same patterns -----
+          - replace_all_patterns(attributes, "value", "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "[REDACTED_EMAIL]")
+          - replace_all_patterns(attributes, "value", "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
+          - replace_all_patterns(attributes, "value", "\\b(?:\\d{4}[ -]?){3}\\d{4}\\b", "[REDACTED_CC]")
+          # ---- 3. well-known sensitive attribute KEYS: mask whole value -----
+          - set(attributes["user_name"], "[REDACTED_NAME]") where attributes["user_name"] != nil
+          - set(attributes["address"], "[REDACTED_ADDRESS]") where attributes["address"] != nil
+          - delete_key(attributes, "http.request.header.authorization")
+          - set(attributes["pii.redacted"], true)      # audit marker visible in Elastic
+
+  batch:
+    timeout: 1s
+
+exporters:
+  elasticsearch/debug:
+    endpoints: ["${env:ES_ENDPOINT}"]
+    api_key: ${env:ES_API_KEY_DEBUG}            # key scoped to the debug index only
+    logs_index: otel-logs-debug-redacted
+    flush:
+      interval: 1s                              # demo: send quickly (default is 30s)
+    tls:
+      insecure_skip_verify: true                # demo only - mount a CA in production
+  debug/redacted:                               # see the redacted result with `kubectl logs`
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 50
+
+service:
+  extensions: [bearertokenauth/in, health_check, zpages]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/redact, batch]
+      exporters: [elasticsearch/debug, debug/redacted]
+  telemetry:
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+    logs:
+      level: info

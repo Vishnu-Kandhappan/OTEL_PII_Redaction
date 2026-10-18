@@ -1,0 +1,72 @@
+# =============================================================================
+# FILTERING AGENT  -  receives WARN/ERROR logs, drops noise, ships to Elastic
+# No PII masking here on purpose: this is the "simple" path. Add the
+# transform/redact block from the pii agent if your errors can carry PII.
+# =============================================================================
+extensions:
+  bearertokenauth/in:
+    token: ${env:FILTER_AGENT_TOKEN}
+  health_check:
+    endpoint: 0.0.0.0:13133
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: bearertokenauth/in
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  filter/drop:                       # a log record is DROPPED when any condition is true
+    error_mode: ignore
+    logs:
+      log_record:
+        - severity_number < SEVERITY_NUMBER_WARN                  # safety net: only WARN and above
+        - IsMatch(body, "(?i)health[-_ ]?check")                  # probe noise
+        - IsMatch(body, "(?i)connection reset by peer")           # known benign retry chatter
+        - attributes["http.target"] == "/healthz"
+
+  attributes/trim:                   # cut fields nobody searches on
+    actions:
+      - key: process.command_line
+        action: delete
+      - key: pipeline.stage
+        value: filtering-agent
+        action: upsert
+
+  batch:
+    timeout: 1s
+
+exporters:
+  elasticsearch/alerts:
+    endpoints: ["${env:ES_ENDPOINT}"]
+    api_key: ${env:ES_API_KEY_ALERTS}           # different key than the debug sink
+    logs_index: otel-logs-alerts
+    flush:
+      interval: 1s                              # demo: send quickly (default is 30s)
+    tls:
+      insecure_skip_verify: true
+  debug/filtered:
+    verbosity: basic
+
+service:
+  extensions: [bearertokenauth/in, health_check, zpages]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/drop, attributes/trim, batch]
+      exporters: [elasticsearch/alerts, debug/filtered]
+  telemetry:
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+    logs:
+      level: info
